@@ -53,8 +53,11 @@
          padding:12px 14px}
   .olog{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
   .olog label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim)}
-  .olog input{background:#0d1117;border:1px solid var(--line);color:var(--txt);border-radius:6px;
-              padding:7px 9px;font:13px ui-monospace,Consolas,monospace;min-width:150px}
+  .olog input,.olog select{background:#0d1117;border:1px solid var(--line);color:var(--txt);
+              border-radius:6px;padding:7px 9px;font:13px ui-monospace,Consolas,monospace;min-width:150px}
+  #jobs .job{display:flex;gap:12px;font:12px ui-monospace,Consolas,monospace;padding:4px 0;
+             border-bottom:1px dashed var(--line)}
+  #jobs .st-run{color:var(--ok)} #jobs .st-ok{color:#7fb2ff} #jobs .st-bad{color:var(--alarm)}
   .olog input:focus{outline:none;border-color:var(--ok)}
   .hint{color:var(--dim);font-size:12px;margin-left:auto}
   #stock{display:flex;flex-wrap:wrap;gap:8px;max-height:132px;overflow:auto;margin-top:8px}
@@ -93,6 +96,16 @@
     <div id="stock"></div>
     <div class="logtitle" style="margin-top:10px">自动补货规则 <span id="rulecount" class="addr"></span></div>
     <div id="rules"></div>
+  </div>
+  <div class="panel">
+    <div class="olog">
+      <label>生产配方<select id="precipe"></select></label>
+      <label>数量<input id="pcount" type="number" value="8" min="1" max="512"></label>
+      <button id="pgo">下单生产</button>
+      <span class="hint" id="phint">等配方…</span>
+    </div>
+    <div class="logtitle" style="margin-top:10px">工单 <span id="jobcount" class="addr"></span></div>
+    <div id="jobs"></div>
   </div>
   <div id="logwrap"><div class="logtitle">事件</div><div id="log"></div></div>
 </main>
@@ -140,6 +153,49 @@ function renderStock(items){
     el.onclick = () => { $('#oitem').value = n; };
     box.appendChild(el);
   });
+}
+
+let RECIPES = [];
+
+function renderRecipes(list){
+  RECIPES = list || [];
+  const sel = $('#precipe');
+  sel.innerHTML = '';
+  RECIPES.forEach(r => {
+    const o = document.createElement('option');
+    o.value = r.id;
+    const ins = (r.inputs || []).map(i => `${(i.item || '').replace(/^[a-z_]+:/, '')}×${i.per}`).join(' + ');
+    const out = (r.output && r.output.item || '').replace(/^[a-z_]+:/, '');
+    o.textContent = `${r.name || r.id}：${ins} → ${out}`;
+    sel.appendChild(o);
+  });
+  $('#phint').textContent = RECIPES.length ? `${RECIPES.length} 个配方` : '（没配配方）';
+}
+
+function renderJobs(list){
+  const box = $('#jobs');
+  box.innerHTML = '';
+  const arr = (list || []).slice().reverse();
+  arr.forEach(j => {
+    const el = document.createElement('div');
+    el.className = 'job';
+    const cls = j.state === '已出货' ? 'st-ok' : (j.state === '生产中' ? 'st-run' : 'st-bad');
+    const t = new Date(j.ts * 1000).toLocaleTimeString('zh-CN', {hour12: false});
+    el.innerHTML = `<span class="addr">#${j.id} ${t}</span>` +
+      `<span>${j.name} ×${j.count}</span>` +
+      `<span class="${cls}">${j.state}</span>` +
+      `<span class="addr">基线 ${j.baseline}</span>`;
+    box.appendChild(el);
+  });
+  $('#jobcount').textContent = arr.length ? `${arr.length} 张` : '（无）';
+}
+
+function produce(){
+  const sel = $('#precipe');
+  if (!sel.value){ log('warn', '没有可选配方'); return; }
+  const count = Math.max(1, Math.min(512, +$('#pcount').value || 1));
+  send({dir: 'produce', recipe: sel.value, count});
+  log('info', `工单 ${sel.value} × ${count}`);
 }
 
 function renderRules(list){
@@ -308,6 +364,8 @@ function handle(m){
     case 'warn': log('warn', m.msg); break;
     case 'stock': renderStock(m.items); break;
     case 'rules': renderRules(m.rules); break;
+    case 'recipes': renderRecipes(m.recipes); break;
+    case 'jobs': renderJobs(m.jobs); break;
     case 'caps': renderCaps(m.caps); break;
     case 'result': log(m.ok ? 'info' : 'err',
                        (m.ok ? '下单回执：' : '下单失败：') + (m.msg || '')); break;
@@ -325,6 +383,8 @@ function connect(){
 document.addEventListener('DOMContentLoaded', () => {
   const go = document.getElementById('ogo');
   if (go) go.onclick = placeOrder;
+  const pgo = document.getElementById('pgo');
+  if (pgo) pgo.onclick = produce;
   const item = document.getElementById('oitem');
   if (item) item.addEventListener('keydown', e => { if (e.key === 'Enter') placeOrder(); });
 });

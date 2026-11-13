@@ -1,33 +1,109 @@
 {
   "server": "es2-sp-demo",
   "area": "LOGISTICS",
-  "bind": { "host": "0.0.0.0", "ws_port": 8765, "http_port": 8080 },
-
-  "counters": { "requests": "%M0", "rejects": "%M1" },
-
+  "bind": {
+    "host": "0.0.0.0",
+    "ws_port": 8765,
+    "http_port": 8080
+  },
+  "counters": {
+    "requests": "%M0",
+    "rejects": "%M1"
+  },
   "rule_cooldown": 60,
-
-  "rules": [
-    { "item": "minecraft:quartz", "low": 32, "qty": 64, "address": "workshop" },
-    { "item": "minecraft:ender_pearl", "low": 32, "qty": 64, "address": "workshop" },
-    { "item": "minecraft:amethyst_shard", "low": 32, "qty": 64, "address": "workshop" }
-  ],
-
   "tags": [
-    { "id": "%I0.0", "desc": "铜板库存", "kind": "DI", "io": "input", "side": "back",  "type": "bool" },
-    { "id": "%I0.1", "desc": "铁板库存", "kind": "DI", "io": "input", "side": "left",  "type": "bool" },
-    { "id": "%I0.2", "desc": "黄铜库存", "kind": "DI", "io": "input", "side": "front", "type": "bool" },
-
-    { "id": "%Q0.0", "desc": "请求 · 铜板 ×1组", "kind": "DQ", "io": "output", "side": "right",
-      "type": "pulse", "pulse_ms": 150, "watch": "%I0.0" },
-    { "id": "%Q0.1", "desc": "请求 · 铁板 ×1组", "kind": "DQ", "io": "output", "side": "top",
-      "type": "pulse", "pulse_ms": 150, "watch": "%I0.1" },
-    { "id": "%Q0.2", "desc": "请求 · 黄铜 ×1组", "kind": "DQ", "io": "output", "side": "bottom",
-      "type": "pulse", "pulse_ms": 150, "watch": "%I0.2" },
-
-    { "id": "%M0", "desc": "请求计数", "kind": "MW", "io": "internal", "type": "int", "init": 0 },
-    { "id": "%M1", "desc": "拒单计数", "kind": "MW", "io": "internal", "type": "int", "init": 0 }
+    {
+      "id": "%I0.0",
+      "desc": "铜板库存",
+      "kind": "DI",
+      "io": "input",
+      "side": "back",
+      "type": "bool"
+    },
+    {
+      "id": "%I0.1",
+      "desc": "铁板库存",
+      "kind": "DI",
+      "io": "input",
+      "side": "left",
+      "type": "bool"
+    },
+    {
+      "id": "%I0.2",
+      "desc": "黄铜库存",
+      "kind": "DI",
+      "io": "input",
+      "side": "front",
+      "type": "bool"
+    },
+    {
+      "id": "%Q0.0",
+      "desc": "请求 · 铜板 ×1组",
+      "kind": "DQ",
+      "io": "output",
+      "side": "right",
+      "type": "pulse",
+      "pulse_ms": 150,
+      "watch": "%I0.0"
+    },
+    {
+      "id": "%Q0.1",
+      "desc": "请求 · 铁板 ×1组",
+      "kind": "DQ",
+      "io": "output",
+      "side": "top",
+      "type": "pulse",
+      "pulse_ms": 150,
+      "watch": "%I0.1"
+    },
+    {
+      "id": "%Q0.2",
+      "desc": "请求 · 黄铜 ×1组",
+      "kind": "DQ",
+      "io": "output",
+      "side": "bottom",
+      "type": "pulse",
+      "pulse_ms": 150,
+      "watch": "%I0.2"
+    },
+    {
+      "id": "%M0",
+      "desc": "请求计数",
+      "kind": "MW",
+      "io": "internal",
+      "type": "int",
+      "init": 0
+    },
+    {
+      "id": "%M1",
+      "desc": "拒单计数",
+      "kind": "MW",
+      "io": "internal",
+      "type": "int",
+      "init": 0
+    }
   ],
-
-  "alarms": []
+  "alarms": [],
+  "recipes": [
+    {
+      "id": "ether",
+      "name": "磨制以太石英",
+      "inputs": [
+        {
+          "item": "minecraft:quartz",
+          "per": 1
+        },
+        {
+          "item": "distantstock:ender_dust",
+          "per": 1
+        }
+      ],
+      "output": {
+        "item": "distantstock:polished_ether_quartz",
+        "per": 1
+      },
+      "address": ""
+    }
+  ],
+  "job_timeout": 600
 }

@@ -23,6 +23,7 @@ CC 电脑： http.websocket("ws://<本机IP>:8765")  —— 连上会先收到�
 
 import asyncio
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -51,6 +52,10 @@ MC = set()   # CC 电脑 ws 连接
 LATCH = {}   # 联锁报警：code -> {code,prio,msg,tag}
 STOCK = {}   # 物品 id -> 数量（来自仓储发报机 ticker.stock()）
 SCAN = {}    # 最近一次产线普查（scan.lua 上报）
+RECIPES = {r["id"]: r for r in (CFG.get("recipes") or [])}
+JOBS = {}                               # 工单 id -> 工单
+JOB_SEQ = 0
+JOB_TIMEOUT = float(CFG.get("job_timeout", 600))
 RULES = CFG.get("rules") or []          # 自动补货规则
 RULE_COOLDOWN = float(CFG.get("rule_cooldown", 60))
 RULE_LAST = {}                          # 规则 -> 上次下单时间
@@ -270,6 +275,67 @@ async def place_order(ws, msg):
                                  ensure_ascii=False))
 
 
+# ---------------------------------------------------------------- 生产工单（主被动结合）
+
+def jobs_state():
+    return sorted(JOBS.values(), key=lambda j: j["ts"])
+
+
+async def start_job(recipe_id, count):
+    """主动：把 n 份配方物料下单出去，然后等产出自己出现在库存里。"""
+    global JOB_SEQ
+    r = RECIPES.get(recipe_id)
+    if not r:
+        return None, "没有这个配方"
+    count = max(1, int(count))
+    inputs = []
+    for spec in r.get("inputs", []):
+        n = int(math.ceil(spec.get("per", 1) * count))
+        inputs.append({"name": spec["item"], "count": n})
+    out_item = r["output"]["item"]
+    base = STOCK.get(out_item, 0)
+
+    JOB_SEQ += 1
+    job = {"id": JOB_SEQ, "recipe": recipe_id, "name": r.get("name", recipe_id),
+           "count": count, "output": out_item, "baseline": base,
+           "state": "生产中", "ts": time.time()}
+    JOBS[job["id"]] = job
+    log(f"[JOB] #{job['id']} {job['name']} ×{count}  基线 {base}")
+
+    ok, note = await dispatch_order(inputs, r.get("address", ""), "job-in")
+    if not ok:
+        job["state"] = "物料下单失败"
+        job["note"] = note
+    await push(WEB, {"dir": "jobs", "jobs": jobs_state()})
+    return job, ""
+
+
+async def check_jobs():
+    """被动：库存里产出够数了，就把货请出来（= 模拟出货/销毁）。"""
+    changed = False
+    for job in list(JOBS.values()):
+        if job["state"] != "生产中":
+            continue
+        cur = STOCK.get(job["output"])
+        if cur is None:
+            if time.time() - job["ts"] > JOB_TIMEOUT:
+                job["state"] = "超时"          # 库存里一直没出现产出
+                changed = True
+            continue
+        if cur >= job["baseline"] + job["count"]:
+            await dispatch_order([{"name": job["output"], "count": job["count"]}],
+                                 "", "job-out")
+            job["state"] = "已出货"
+            job["finish"] = time.time()
+            log(f"[JOB] #{job['id']} 产出到货 {cur}，已请出 {job['count']}")
+            changed = True
+        elif time.time() - job["ts"] > JOB_TIMEOUT:
+            job["state"] = "超时"
+            changed = True
+    if changed:
+        await push(WEB, {"dir": "jobs", "jobs": jobs_state()})
+
+
 # ---------------------------------------------------------------- 自动补货规则
 
 def rule_key(r):
@@ -392,6 +458,7 @@ async def mc_session(ws):
                         STOCK[name] = int(it.get("count") or 0)
                 await push(WEB, {"dir": "stock", "items": STOCK, "ts": time.time()})
                 await evaluate_rules()
+                await check_jobs()
             elif msg.get("dir") == "caps":
                 CAPS.clear()
                 CAPS.update({k: bool(v) for k, v in (msg.get("caps") or {}).items()})
@@ -433,12 +500,21 @@ async def web_session(ws):
                              ensure_ascii=False))
     await ws.send(json.dumps({"dir": "caps", "caps": CAPS}, ensure_ascii=False))
     await ws.send(json.dumps({"dir": "rules", "rules": rules_state()}, ensure_ascii=False))
+    await ws.send(json.dumps({"dir": "jobs", "jobs": jobs_state()}, ensure_ascii=False))
+    await ws.send(json.dumps({"dir": "recipes", "recipes": list(RECIPES.values())},
+                             ensure_ascii=False))
     await notify_link()
     try:
         async for raw in ws:
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
+                continue
+            if msg.get("dir") == "produce":
+                job, err = await start_job(msg.get("recipe"), msg.get("count") or 1)
+                if err:
+                    await ws.send(json.dumps({"dir": "warn", "msg": err},
+                                             ensure_ascii=False))
                 continue
             if msg.get("dir") == "order":
                 await place_order(ws, msg)
