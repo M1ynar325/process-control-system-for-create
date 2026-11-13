@@ -51,6 +51,9 @@ MC = set()   # CC 电脑 ws 连接
 LATCH = {}   # 联锁报警：code -> {code,prio,msg,tag}
 STOCK = {}   # 物品 id -> 数量（来自仓储发报机 ticker.stock()）
 SCAN = {}    # 最近一次产线普查（scan.lua 上报）
+RULES = CFG.get("rules") or []          # 自动补货规则
+RULE_COOLDOWN = float(CFG.get("rule_cooldown", 60))
+RULE_LAST = {}                          # 规则 -> 上次下单时间
 CAPS = {}    # 电脑报告它挂了哪些 Create 外设
 DB = None
 
@@ -222,8 +225,30 @@ async def bump(counter_key, n=1):
 
 # ---------------------------------------------------------------- 下单（外设路线）
 
+async def dispatch_order(items, address, source="manual"):
+    """核心派单：推给电脑、记流水、计数、挂报警。返回 (ok, note)。"""
+    short = ", ".join(f"{i['name']}×{i['count']}" for i in items)
+    if not MC:
+        record_order(short, address, 0, "电脑离线")
+        return False, "CC 未连接"
+
+    missing = [i["name"] for i in items
+               if i["name"] in STOCK and STOCK[i["name"]] < i["count"]]
+
+    await push(MC, {"dir": "to-mc", "kind": "order", "items": items, "address": address})
+    await bump("requests")
+    if missing:
+        await bump("rejects")
+    log(f"[ORDER/{source}] {short} -> {address or '(默认地址)'}")
+    record_order(short, address, 0 if missing else 1, "库存不足" if missing else "")
+
+    if missing:
+        await latch("ALM-STOCK", "P2", "订单物品库存不足: " + ", ".join(missing), None)
+    return (not missing), ("库存不足" if missing else "")
+
+
 async def place_order(ws, msg):
-    """把一张订单发给游戏里的电脑，由它调 Create 外设的 setRequest/request。"""
+    """人工下单入口（网页来的）。"""
     items = []
     for it in msg.get("items") or []:
         name = (it.get("name") or "").strip()
@@ -235,32 +260,59 @@ async def place_order(ws, msg):
             n = 1
         items.append({"name": name, "count": max(1, min(256, n))})   # 源码里单条上限 256
     if not items:
-        await ws.send(json.dumps({"dir": "warn", "msg": "订单为空"},
-                                 ensure_ascii=False))
+        await ws.send(json.dumps({"dir": "warn", "msg": "订单为空"}, ensure_ascii=False))
         return
     if len(items) > 9:                                                # 请求器只有 9 格
         items = items[:9]
-    address = (msg.get("address") or "").strip()
+    ok, note = await dispatch_order(items, (msg.get("address") or "").strip(), "manual")
+    if note == "CC 未连接":
+        await ws.send(json.dumps({"dir": "warn", "msg": "CC 未连接，订单没有发出去"},
+                                 ensure_ascii=False))
 
-    if not MC:
-        await ws.send(json.dumps(
-            {"dir": "warn", "msg": "CC 未连接，订单没有发出去"}, ensure_ascii=False))
-        record_order(",".join(i["name"] for i in items), address, 0, "电脑离线")
+
+# ---------------------------------------------------------------- 自动补货规则
+
+def rule_key(r):
+    return f"{r.get('item')}|{r.get('address', '')}"
+
+
+def rules_state():
+    out = []
+    for r in RULES:
+        item = r.get("item")
+        out.append({"item": item, "low": r.get("low"), "qty": r.get("qty"),
+                    "address": r.get("address", ""),
+                    "stock": STOCK.get(item),
+                    "last": RULE_LAST.get(rule_key(r), 0)})
+    return out
+
+
+async def evaluate_rules():
+    """库存低于阈值就自动派单，规则本身写在 tags.json 的 rules 里（逻辑后补）。"""
+    if not RULES:
         return
-
-    short = ", ".join(f"{i['name']}×{i['count']}" for i in items)
-    missing = [i["name"] for i in items
-               if i["name"] in STOCK and STOCK[i["name"]] < i["count"]]
-
-    await push(MC, {"dir": "to-mc", "kind": "order", "items": items, "address": address})
-    await bump("requests")
-    if missing:
-        await bump("rejects")
-    log(f"[ORDER] {short} -> {address or '(默认地址)'}")
-    record_order(short, address, 0 if missing else 1, "库存不足" if missing else "")
-
-    if missing:
-        await latch("ALM-STOCK", "P2", "订单物品库存不足: " + ", ".join(missing), None)
+    now = time.time()
+    violated = False
+    for r in RULES:
+        item, low, qty = r.get("item"), r.get("low"), r.get("qty")
+        if not item or low is None or not qty:
+            continue
+        cur = STOCK.get(item)
+        if cur is None:
+            continue
+        if cur >= low:
+            continue
+        violated = True
+        k = rule_key(r)
+        if now - RULE_LAST.get(k, 0) < RULE_COOLDOWN:
+            continue
+        RULE_LAST[k] = now
+        log(f"[AUTO] {item} 库存 {cur} < {low}，自动补 {qty}")
+        await dispatch_order([{"name": item, "count": int(qty)}],
+                             r.get("address", ""), "auto")
+    if not violated and LATCH.pop("ALM-STOCK", None):
+        await alarm_changed()
+    await push(WEB, {"dir": "rules", "rules": rules_state()})
 
 
 # ---------------------------------------------------------------- 下单：一次请求 = 一个红石脉冲
@@ -339,6 +391,7 @@ async def mc_session(ws):
                     if name and name != "minecraft:air":
                         STOCK[name] = int(it.get("count") or 0)
                 await push(WEB, {"dir": "stock", "items": STOCK, "ts": time.time()})
+                await evaluate_rules()
             elif msg.get("dir") == "caps":
                 CAPS.clear()
                 CAPS.update({k: bool(v) for k, v in (msg.get("caps") or {}).items()})
@@ -379,6 +432,7 @@ async def web_session(ws):
     await ws.send(json.dumps({"dir": "stock", "items": STOCK, "ts": time.time()},
                              ensure_ascii=False))
     await ws.send(json.dumps({"dir": "caps", "caps": CAPS}, ensure_ascii=False))
+    await ws.send(json.dumps({"dir": "rules", "rules": rules_state()}, ensure_ascii=False))
     await notify_link()
     try:
         async for raw in ws:

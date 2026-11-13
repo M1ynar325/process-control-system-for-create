@@ -62,6 +62,9 @@
         border-radius:999px;padding:4px 10px;font:12px ui-monospace,Consolas,monospace;cursor:pointer}
   .chip:hover{border-color:var(--ok)}
   .chip b{color:var(--ok)} .chip.low b{color:var(--alarm)}
+  .rule{display:flex;gap:10px;align-items:baseline;font:12px ui-monospace,Consolas,monospace;
+        padding:4px 0;border-bottom:1px dashed var(--line)}
+  .rule .low{color:var(--alarm)}
   #log{font:12px/1.7 ui-monospace,Consolas,monospace;color:var(--dim);white-space:pre-wrap}
   #log .t{color:#4b5a6b;margin-right:8px}
   #log .e{color:#ffb3b3} #log .w{color:#ffd98a} #log .i{color:var(--ok)}
@@ -88,6 +91,8 @@
     <datalist id="itemlist"></datalist>
     <div class="logtitle" style="margin-top:10px">库存快照 <span id="stockcount" class="addr"></span></div>
     <div id="stock"></div>
+    <div class="logtitle" style="margin-top:10px">自动补货规则 <span id="rulecount" class="addr"></span></div>
+    <div id="rules"></div>
   </div>
   <div id="logwrap"><div class="logtitle">事件</div><div id="log"></div></div>
 </main>
@@ -135,6 +140,23 @@ function renderStock(items){
     el.onclick = () => { $('#oitem').value = n; };
     box.appendChild(el);
   });
+}
+
+function renderRules(list){
+  const box = $('#rules');
+  box.innerHTML = '';
+  const arr = list || [];
+  arr.forEach(r => {
+    const el = document.createElement('div');
+    el.className = 'rule';
+    const has = r.stock !== null && r.stock !== undefined;
+    const low = has && r.stock < r.low;
+    el.innerHTML = `<span class="${low ? 'low' : ''}">${(r.item || '').replace(/^minecraft:/, '')}</span>` +
+      `<span class="addr">库存 ${has ? r.stock : '—'} · ${low ? '低于' : '安全'} ${r.low} → 补 ${r.qty}` +
+      (r.address ? ` → ${r.address}` : '') + `</span>`;
+    box.appendChild(el);
+  });
+  $('#rulecount').textContent = arr.length ? `${arr.length} 条` : '（未配置）';
 }
 
 function renderCaps(c){
@@ -285,6 +307,7 @@ function handle(m){
     case 'link': setLink(m.mc > 0); break;
     case 'warn': log('warn', m.msg); break;
     case 'stock': renderStock(m.items); break;
+    case 'rules': renderRules(m.rules); break;
     case 'caps': renderCaps(m.caps); break;
     case 'result': log(m.ok ? 'info' : 'err',
                        (m.ok ? '下单回执：' : '下单失败：') + (m.msg || '')); break;

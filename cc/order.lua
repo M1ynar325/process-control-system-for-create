@@ -93,7 +93,14 @@ local function execOrder(msg)
   end
 
   if ticker then
-    -- 发报机路线：按过滤器下单，库里有的才发
+    -- 发报机路线：按过滤器下单，库里有的才发。
+    --
+    -- 参数索引已从 CC 源码确认（projects/core/src/main/java/dan200/computercraft/core/
+    -- asm/Generator.java）：IArguments 是原样拿到整张参数表，前面的类型化参数
+    -- 不会把它裁掉。所以 requestFiltered(address, f1, f2) 里 filters[0] 是地址，
+    -- 真过滤器从下标 1 开始 —— Create 那句 `for (i = 1; i < count; i++)` 是对的。
+    -- 过滤器默认 _mode = "contains"（ComputerUtil.MatchMode.parse），
+    -- 所以只写 name + _requestCount 就能匹配，不用写全物品详情。
     local args = {}
     for i, it in ipairs(items) do
       args[i] = { name = it.name, _requestCount = it.count or 1 }
@@ -101,7 +108,8 @@ local function execOrder(msg)
     local ok, res = pcall(ticker.requestFiltered, address, unpack(args))
     if ok then
       say(("过滤器下单 -> %d 个"):format(tonumber(res) or 0))
-      send({ dir = "order_result", ok = true, msg = ("%d 个"):format(tonumber(res) or 0) })
+      send({ dir = "order_result", ok = (tonumber(res) or 0) > 0,
+             msg = ("%d 个"):format(tonumber(res) or 0) })
     else
       say("requestFiltered 失败: " .. tostring(res))
       send({ dir = "order_result", ok = false, msg = tostring(res) })

@@ -5,6 +5,14 @@
 
   "counters": { "requests": "%M0", "rejects": "%M1" },
 
+  "rule_cooldown": 60,
+
+  "rules": [
+    { "item": "minecraft:quartz", "low": 32, "qty": 64, "address": "workshop" },
+    { "item": "minecraft:ender_pearl", "low": 32, "qty": 64, "address": "workshop" },
+    { "item": "minecraft:amethyst_shard", "low": 32, "qty": 64, "address": "workshop" }
+  ],
+
   "tags": [
     { "id": "%I0.0", "desc": "铜板库存", "kind": "DI", "io": "input", "side": "back",  "type": "bool" },
     { "id": "%I0.1", "desc": "铁板库存", "kind": "DI", "io": "input", "side": "left",  "type": "bool" },

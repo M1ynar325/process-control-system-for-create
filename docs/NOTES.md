@@ -26,12 +26,19 @@
 
 结论：**不用装 cc:cbridge，也不用把物品写死在方块 GUI 里**。之前"CC 读不到转速/库存"的判断是错的。
 
-## 待验证（别当成已实现）
+## 已确认（CC 源码 + Create 源码）
 
-1. `requestFiltered(address, filter…)` 的参数索引 —— 源码是 `for (i = 1; i < count; i++)`，
-   即第 0 位当 address。真机第一次跑先只发一格过滤，确认后再加
-2. 真机 `setRequest` + `request()` 的实际效果（本机只验到假 CC 层）
-3. 送达无法确认：`request()` 只代表 Create 接受了请求
+1. **`requestFiltered` 的参数索引**：CC 的 `core/asm/Generator.java` 里 `IArguments`
+   是 identity 原样传入，前面的类型化参数不会裁表。所以 `requestFiltered(address, f1, f2)`
+   里 `filters[0]` 是地址，**真过滤器从索引 1 开始** —— Create 那句 `for (i = 1; …)` 是对的
+2. **过滤器匹配模式**：`ComputerUtil.MatchMode.parse` 缺省是 `CONTAINS`，
+   所以 `{name="mod:item", _requestCount=n}` 就够，不必写全物品详情
+3. 红石请求器 `setRequest` 单格 `count` 上限 256、最多 9 格
+
+## 仍待真机验证
+
+1. 真机 `requestFiltered` / `setRequest` 的实际效果（本机只验到假 CC 层）
+2. 送达无法确认：`request()` 只代表 Create 接受了请求
 
 ## 工程约定
 
