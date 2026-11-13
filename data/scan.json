@@ -1,0 +1,38 @@
+{
+  "dir": "scan",
+  "computer": "LineCtrl",
+  "redstone": {
+    "top": false,
+    "bottom": false,
+    "left": true,
+    "right": false,
+    "front": false,
+    "back": false
+  },
+  "peripherals": [
+    {
+      "name": "left",
+      "type": "Create_StockTicker",
+      "side": "left",
+      "stockKinds": 7,
+      "stockSample": [
+        "minecraft:iron_ingot×128",
+        "create:copper_sheet×64"
+      ]
+    },
+    {
+      "name": "right",
+      "type": "Create_RedstoneRequester",
+      "side": "right",
+      "address": "workshop",
+      "configuration": "allow_partial",
+      "request": [
+        "minecraft:iron_ingot×16"
+      ]
+    },
+    {
+      "name": "monitor_0",
+      "type": "monitor"
+    }
+  ]
+}

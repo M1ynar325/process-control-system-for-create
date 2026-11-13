@@ -50,6 +50,7 @@ WEB = set()  # 浏览器 ws 连接
 MC = set()   # CC 电脑 ws 连接
 LATCH = {}   # 联锁报警：code -> {code,prio,msg,tag}
 STOCK = {}   # 物品 id -> 数量（来自仓储发报机 ticker.stock()）
+SCAN = {}    # 最近一次产线普查（scan.lua 上报）
 CAPS = {}    # 电脑报告它挂了哪些 Create 外设
 DB = None
 
@@ -119,6 +120,15 @@ def hist(tag, value):
         DB.commit()
     except sqlite3.Error as e:          # 历史库挂了不能拖垮实时控制
         log("[DB]", e)
+
+
+def save_scan(payload):
+    try:
+        os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
+        with open(os.path.join(ROOT, "data", "scan.json"), "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        log("[SCAN] 写盘失败:", e)
 
 
 def record_order(items, address, ok, note):
@@ -334,6 +344,14 @@ async def mc_session(ws):
                 CAPS.update({k: bool(v) for k, v in (msg.get("caps") or {}).items()})
                 log("[CAPS]", CAPS or "无")
                 await push(WEB, {"dir": "caps", "caps": CAPS})
+            elif msg.get("dir") == "scan":
+                SCAN.clear()
+                SCAN.update(msg)
+                save_scan(msg)
+                log("[SCAN]", f"{len(msg.get('peripherals') or [])} 个外设")
+                await ws.send(json.dumps({"dir": "ack", "msg": "scan 已记录"},
+                                         ensure_ascii=False))
+                await push(WEB, {"dir": "scan", "scan": msg})
             elif msg.get("dir") == "order_result":
                 ok = bool(msg.get("ok"))
                 log("[ORDER]", ("成功 " if ok else "失败 ") + str(msg.get("msg") or ""))
@@ -424,6 +442,9 @@ class Handler(SimpleHTTPRequestHandler):
         p = self.path.split("?")[0]
         if p.startswith("/api/state"):
             self._json({"state": STATE, "ts": TS, "alarms": active_alarms(), "mc": len(MC)})
+            return
+        if p.startswith("/api/scan"):
+            self._json(SCAN or {"note": "还没跑过 scan.lua"})
             return
         if p.startswith("/api/stock"):
             self._json({"items": STOCK, "caps": CAPS, "mc": len(MC)})
