@@ -19,7 +19,7 @@
   用法：放电脑里，执行 order
 ]]
 
-local BRIDGE = "ws://192.168.0.3:8765"   -- ← 改成跑 bridge.py 那台机器的 IP
+local BRIDGE = "ws://192.168.0.3:8765/ws/mc"   -- ← 改 IP；/ws/mc 不能少，不然会被当成浏览器
 local STOCK_EVERY = 2.0                  -- 库存快照周期（秒）
 
 local ws
@@ -41,7 +41,7 @@ local function findPeriphs()
   ticker = peripheral.find("Create_StockTicker")
   req = peripheral.find("Create_RedstoneRequester")
   local caps = { ticker = ticker ~= nil, requester = req ~= nil }
-  say(("外设: 仓储发报机=%s 红石请求器=%s")
+  say(("peri: ticker=%s requester=%s")
     :format(tostring(caps.ticker), tostring(caps.requester)))
   send({ dir = "caps", caps = caps })
 end
@@ -50,7 +50,7 @@ local function reportStock()
   if not ticker then return end
   local ok, stock = pcall(ticker.stock)
   if not ok then
-    say("读库存失败: " .. tostring(stock))
+    say("stock read failed: " .. tostring(stock))
     return
   end
   local items = {}
@@ -60,6 +60,7 @@ local function reportStock()
     end
   end
   send({ dir = "stock", items = items })
+  say(("stock: %d kinds"):format(#items))
 end
 
 local function execOrder(msg)
@@ -77,16 +78,16 @@ local function execOrder(msg)
     end
     local ok, err = pcall(req.setRequest, unpack(args))
     if not ok then
-      say("setRequest 失败: " .. tostring(err))
+      say("setRequest failed: " .. tostring(err))
       send({ dir = "order_result", ok = false, msg = tostring(err) })
       return
     end
     local ok2, err2 = pcall(req.request)
     if ok2 then
-      say(("已下单 %d 格 -> %s"):format(#args, address ~= "" and address or "(默认)"))
+      say(("order sent: %d slots -> %s"):format(#args, address ~= "" and address or "(default)"))
       send({ dir = "order_result", ok = true, msg = ("%d 格"):format(#args) })
     else
-      say("request 失败: " .. tostring(err2))
+      say("request failed: " .. tostring(err2))
       send({ dir = "order_result", ok = false, msg = tostring(err2) })
     end
     return
@@ -107,17 +108,17 @@ local function execOrder(msg)
     end
     local ok, res = pcall(ticker.requestFiltered, address, unpack(args))
     if ok then
-      say(("过滤器下单 -> %d 个"):format(tonumber(res) or 0))
+      say(("filtered order -> %d items"):format(tonumber(res) or 0))
       send({ dir = "order_result", ok = (tonumber(res) or 0) > 0,
              msg = ("%d 个"):format(tonumber(res) or 0) })
     else
-      say("requestFiltered 失败: " .. tostring(res))
+      say("filtered order failed: " .. tostring(res))
       send({ dir = "order_result", ok = false, msg = tostring(res) })
     end
     return
   end
 
-  say("没找到下单外设")
+  say("no order peripheral")
   send({ dir = "order_result", ok = false, msg = "没有下单外设" })
 end
 
@@ -129,7 +130,7 @@ local function handle(raw)
       execOrder(msg)
     end
   elseif msg.dir == "cfg" then
-    say("配置送达")
+    say("cfg ok")
   end
 end
 
@@ -152,17 +153,17 @@ local function main()
   while true do
     local ok, sock = pcall(http.websocket, BRIDGE)
     if not ok then
-      say("连不上 " .. BRIDGE .. " ——3 秒后重试")
+      say("cannot reach " .. BRIDGE .. ", retry in 3s")
       os.sleep(3)
     else
       ws = sock
-      say("已连接 " .. BRIDGE)
+      say("connected " .. BRIDGE)
       findPeriphs()
       reportStock()
       lastStock = os.clock()
       loop()
       ws = nil
-      say("连接断开，重连中")
+      say("link down, reconnecting")
       os.sleep(2)
     end
   end
